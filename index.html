@@ -1,0 +1,1092 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>🐾 Super Chess — Chaos Edition</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/chess.js/0.10.3/chess.min.js"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --sq: 68px;
+      --bg: #0d0d1a;
+      --surface: #161628;
+      --surface2: #1e1e38;
+      --surface3: #252545;
+      --accent: #e94560;
+      --accent2: #f5a623;
+      --accent3: #7c4dff;
+      --text: #e8e8f0;
+      --text-dim: #7070a0;
+      --light-sq: #f0d9b5;
+      --dark-sq: #b58863;
+      --sel-color: rgba(106,190,106,0.85);
+      --last-color: rgba(245,166,35,0.45);
+      --check-color: rgba(233,69,96,0.65);
+    }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* ── HEADER ── */
+    header {
+      background: var(--surface);
+      border-bottom: 2px solid var(--accent);
+      padding: 10px 20px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 16px;
+    }
+    header h1 {
+      font-size: 1.7rem;
+      background: linear-gradient(120deg, var(--accent), var(--accent2), var(--accent3));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+      white-space: nowrap;
+    }
+    header p { color: var(--text-dim); font-size: 0.8rem; }
+
+    /* ── LAYOUT ── */
+    .main {
+      display: flex;
+      flex: 1;
+      gap: 14px;
+      padding: 14px;
+      max-width: 1280px;
+      margin: 0 auto;
+      width: 100%;
+      align-items: flex-start;
+    }
+
+    /* ── BOARD AREA ── */
+    .board-area { display: flex; flex-direction: column; align-items: center; flex-shrink: 0; }
+
+    /* Timer / turn panel */
+    .turn-panel {
+      background: var(--surface);
+      border-radius: 10px;
+      padding: 10px 14px;
+      margin-bottom: 10px;
+      width: calc(var(--sq)*8 + 28px);
+    }
+    .turn-row { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
+    .turn-dot {
+      width: 16px; height: 16px; border-radius: 50%; flex-shrink: 0;
+      box-shadow: 0 0 6px rgba(255,255,255,0.2);
+    }
+    .turn-dot.w { background: #f5f5f5; border: 2px solid #999; }
+    .turn-dot.b { background: #1a1a2e; border: 2px solid #666; }
+    #turnText { font-size: 1rem; font-weight: 700; }
+    .timer-wrap { background: var(--surface2); border-radius: 6px; height: 10px; overflow: hidden; }
+    #timerBar {
+      height: 100%; border-radius: 6px;
+      transition: width 1s linear, background-color 0.5s;
+      background: #4caf50;
+    }
+    #timerLabel { font-size: 0.75rem; color: var(--text-dim); text-align: right; margin-top: 3px; }
+
+    /* Board wrapper with rank labels */
+    .board-wrap { display: flex; flex-direction: row; align-items: flex-start; }
+    .rank-col {
+      display: flex; flex-direction: column;
+      margin-right: 4px; margin-top: 0;
+    }
+    .rank-col span {
+      height: var(--sq); width: 16px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 0.7rem; color: var(--text-dim); font-weight: 700;
+    }
+    .board-col { display: flex; flex-direction: column; }
+    #board {
+      display: grid;
+      grid-template-columns: repeat(8, var(--sq));
+      grid-template-rows: repeat(8, var(--sq));
+      border: 3px solid var(--surface2);
+      box-shadow: 0 0 40px rgba(124,77,255,0.15), 0 0 80px rgba(233,69,96,0.08);
+    }
+    .file-row {
+      display: flex; flex-direction: row;
+      margin-top: 4px;
+    }
+    .file-row span {
+      width: var(--sq); text-align: center;
+      font-size: 0.7rem; color: var(--text-dim); font-weight: 700;
+    }
+
+    /* Squares */
+    .sq {
+      width: var(--sq); height: var(--sq);
+      display: flex; align-items: center; justify-content: center;
+      cursor: pointer; position: relative; overflow: visible;
+      transition: filter 0.1s;
+    }
+    .sq.light { background: var(--light-sq); }
+    .sq.dark  { background: var(--dark-sq); }
+    .sq:hover { filter: brightness(1.13); }
+    .sq.selected { background: var(--sel-color) !important; }
+    .sq.last-from, .sq.last-to { background: var(--last-color) !important; }
+    .sq.in-check { background: var(--check-color) !important; }
+
+    /* Legal move dots */
+    .sq.legal::after {
+      content: ''; position: absolute;
+      width: 34%; height: 34%; border-radius: 50%;
+      background: rgba(0,0,0,0.22); pointer-events: none;
+    }
+    .sq.legal-cap::after {
+      content: ''; position: absolute;
+      inset: 3px; border-radius: 50%;
+      background: transparent;
+      border: 5px solid rgba(0,0,0,0.2);
+      pointer-events: none;
+    }
+
+    /* Piece */
+    .piece {
+      font-size: calc(var(--sq) * 0.79);
+      line-height: 1;
+      user-select: none;
+      pointer-events: none;
+      position: relative; z-index: 1;
+      transition: transform 0.12s ease;
+      filter: drop-shadow(1px 2px 2px rgba(0,0,0,0.4));
+    }
+
+    /* Capture flash */
+    @keyframes capFlash {
+      0%  { background: rgba(233,69,96,0.9); }
+      100%{ background: transparent; }
+    }
+    .cap-flash { animation: capFlash 0.45s ease-out; }
+
+    /* Particles */
+    .particle {
+      position: absolute; width: 5px; height: 5px; border-radius: 50%;
+      pointer-events: none; z-index: 10;
+      animation: pfly 0.65s ease-out forwards;
+    }
+    @keyframes pfly {
+      0%   { transform: translate(-50%,-50%) scale(1.2); opacity: 1; }
+      100% { transform: translate(calc(-50% + var(--dx)), calc(-50% + var(--dy))) scale(0); opacity: 0; }
+    }
+
+    /* ── SIDEBAR ── */
+    .sidebar {
+      flex: 1; display: flex; flex-direction: column; gap: 10px;
+      min-width: 260px; max-width: 340px;
+    }
+
+    .panel {
+      background: var(--surface);
+      border-radius: 10px;
+      padding: 10px 12px;
+    }
+    .panel h3 {
+      font-size: 0.75rem; text-transform: uppercase;
+      letter-spacing: 0.1em; color: var(--accent2);
+      margin-bottom: 7px; padding-bottom: 5px;
+      border-bottom: 1px solid var(--surface3);
+    }
+
+    /* Captured */
+    .cap-row {
+      display: flex; flex-wrap: wrap; gap: 1px;
+      min-height: 26px; padding: 3px 5px;
+      background: var(--bg); border-radius: 5px;
+      font-size: 1.15rem;
+    }
+    .cap-sep { font-size: 0.65rem; color: var(--text-dim); text-align: center; margin: 2px 0; }
+
+    /* Move history */
+    .history-scroll {
+      max-height: 130px; overflow-y: auto;
+      font-family: 'Cascadia Code', 'Consolas', monospace;
+      font-size: 0.82rem;
+    }
+    .h-row {
+      display: flex; gap: 6px; padding: 2px 4px;
+      border-radius: 3px;
+    }
+    .h-row:nth-child(even) { background: var(--surface2); }
+    .h-num { color: var(--text-dim); min-width: 22px; }
+    .h-w, .h-b { min-width: 56px; }
+
+    /* Event log */
+    .elog { max-height: 90px; overflow-y: auto; }
+    .elog-item {
+      font-size: 0.78rem; padding: 3px 7px;
+      border-left: 3px solid var(--accent2);
+      margin-bottom: 3px; background: var(--bg);
+      border-radius: 0 4px 4px 0;
+      color: var(--accent2); font-style: italic;
+    }
+
+    /* Chat */
+    .chat-log { max-height: 150px; overflow-y: auto; margin-bottom: 8px; }
+    .chat-msg {
+      padding: 5px 8px; margin-bottom: 4px;
+      border-radius: 7px; font-size: 0.82rem;
+      line-height: 1.4;
+    }
+    .chat-msg.white { background: rgba(255,255,255,0.06); border-left: 3px solid #ccc; }
+    .chat-msg.black { background: rgba(124,77,255,0.12); border-left: 3px solid var(--accent3); }
+    .chat-header {
+      display: flex; justify-content: space-between;
+      margin-bottom: 2px;
+    }
+    .chat-sender { font-size: 0.7rem; font-weight: 700; color: var(--text-dim); }
+    .chat-time   { font-size: 0.65rem; color: var(--text-dim); }
+    .chat-text   { color: var(--text); }
+
+    .chat-buttons { display: flex; flex-direction: column; gap: 7px; }
+    .cb-section { display: flex; flex-direction: column; gap: 4px; }
+    .cb-label { font-size: 0.68rem; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.05em; }
+    .cb-row { display: flex; flex-wrap: wrap; gap: 4px; }
+    .cb {
+      background: var(--surface2); border: 1px solid rgba(255,255,255,0.08);
+      color: var(--text); padding: 3px 7px;
+      border-radius: 5px; cursor: pointer; font-size: 0.72rem;
+      transition: background 0.15s, border-color 0.15s;
+      white-space: nowrap; max-width: 160px;
+      overflow: hidden; text-overflow: ellipsis;
+    }
+    .cb:hover { background: var(--accent); border-color: var(--accent); }
+
+    /* ── MODALS ── */
+    .overlay {
+      display: none; position: fixed; inset: 0;
+      background: rgba(0,0,0,0.78); z-index: 200;
+      align-items: center; justify-content: center;
+    }
+    .overlay.show { display: flex; }
+    .modal {
+      background: var(--surface);
+      border-radius: 18px; padding: 30px 28px;
+      text-align: center; max-width: 380px; width: 92%;
+      border: 2px solid var(--accent);
+      box-shadow: 0 0 60px rgba(233,69,96,0.25);
+    }
+    .modal h2 {
+      font-size: 1.8rem; margin-bottom: 8px;
+      background: linear-gradient(120deg, var(--accent), var(--accent2));
+      -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+    .modal p { color: var(--text-dim); margin-bottom: 22px; font-size: 0.95rem; }
+    .btn-primary {
+      background: linear-gradient(120deg, var(--accent), var(--accent2));
+      border: none; color: #fff; padding: 11px 30px;
+      border-radius: 9px; font-size: 0.95rem; font-weight: 700;
+      cursor: pointer; transition: transform 0.12s, box-shadow 0.12s;
+    }
+    .btn-primary:hover { transform: scale(1.05); box-shadow: 0 4px 20px rgba(233,69,96,0.35); }
+
+    .promo-choices { display: flex; gap: 10px; justify-content: center; margin-top: 14px; }
+    .promo-btn {
+      width: 60px; height: 60px; font-size: 2.3rem;
+      background: var(--surface2); border: 2px solid transparent;
+      border-radius: 8px; cursor: pointer;
+      transition: border-color 0.15s, background 0.15s;
+    }
+    .promo-btn:hover { border-color: var(--accent); background: var(--bg); }
+
+    /* ── RESPONSIVE ── */
+    @media (max-width: 880px) {
+      :root { --sq: 50px; }
+      .main { flex-direction: column; align-items: center; }
+      .sidebar { max-width: 100%; width: 100%; }
+    }
+    @media (max-width: 480px) {
+      :root { --sq: 40px; }
+    }
+
+    /* ── SCROLLBARS ── */
+    ::-webkit-scrollbar { width: 5px; }
+    ::-webkit-scrollbar-track { background: var(--bg); }
+    ::-webkit-scrollbar-thumb { background: var(--surface3); border-radius: 3px; }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>🐾 Super Chess</h1>
+  <p>chess, but the pieces have opinions</p>
+</header>
+
+<div class="main">
+  <!-- ── BOARD AREA ── -->
+  <div class="board-area">
+    <div class="turn-panel" id="turnPanel">
+      <div class="turn-row">
+        <div class="turn-dot w" id="turnDot"></div>
+        <span id="turnText">White's Turn</span>
+      </div>
+      <div class="timer-wrap"><div id="timerBar" style="width:100%"></div></div>
+      <div id="timerLabel">15s</div>
+    </div>
+
+    <div class="board-wrap">
+      <div class="rank-col" id="rankCol"></div>
+      <div class="board-col">
+        <div id="board"></div>
+        <div class="file-row" id="fileRow"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── SIDEBAR ── -->
+  <div class="sidebar">
+    <!-- Captured pieces -->
+    <div class="panel">
+      <h3>Captured Pieces</h3>
+      <div class="cap-row" id="capW"></div>
+      <div class="cap-sep">⬆ White's captures · Black's captures ⬇</div>
+      <div class="cap-row" id="capB"></div>
+    </div>
+
+    <!-- Move history -->
+    <div class="panel">
+      <h3>Move History</h3>
+      <div class="history-scroll" id="moveHist"></div>
+    </div>
+
+    <!-- Chaos log -->
+    <div class="panel">
+      <h3>🌀 Chaos Log</h3>
+      <div class="elog" id="eLog"></div>
+    </div>
+
+    <!-- Trash talk -->
+    <div class="panel">
+      <h3>💬 Trash Talk</h3>
+      <div class="chat-log" id="chatLog"></div>
+      <div class="chat-buttons">
+        <div class="cb-section">
+          <div class="cb-label">⬜ White says:</div>
+          <div class="cb-row" id="wBtns"></div>
+        </div>
+        <div class="cb-section">
+          <div class="cb-label">⬛ Black says:</div>
+          <div class="cb-row" id="bBtns"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Game Over Modal -->
+<div class="overlay" id="gameOverOverlay">
+  <div class="modal">
+    <h2 id="goTitle">Game Over</h2>
+    <p id="goMsg">The chaos has concluded.</p>
+    <button class="btn-primary" onclick="resetGame()">Play Again 🎮</button>
+  </div>
+</div>
+
+<!-- Promotion Modal -->
+<div class="overlay" id="promoOverlay">
+  <div class="modal">
+    <h2>Promotion!</h2>
+    <p>Your pawn survived the gauntlet. Choose your reward:</p>
+    <div class="promo-choices" id="promoChoices"></div>
+  </div>
+</div>
+
+<script>
+// ════════════════════════════════════════════
+// GLOBALS
+// ════════════════════════════════════════════
+let game = new Chess();
+let selSq = null;
+let legalMvs = [];
+let lastMove = null; // { from, to }
+let timerSecs = 15;
+let timerIv = null;
+let capByW = []; // pieces captured by White (i.e. black pieces removed)
+let capByB = []; // pieces captured by Black (i.e. white pieces removed)
+let pendingPromo = null; // { from, to }
+let audioCtx = null;
+
+const UNICODE = {
+  wK:'♔', wQ:'♕', wR:'♖', wB:'♗', wN:'♘', wP:'♙',
+  bK:'♚', bQ:'♛', bR:'♜', bB:'♝', bN:'♞', bP:'♟'
+};
+
+function pieceChar(p) {
+  return p ? (UNICODE[p.color + p.type.toUpperCase()] || '?') : '';
+}
+
+function pieceName(p) {
+  const t = {k:'King',q:'Queen',r:'Rook',b:'Bishop',n:'Knight',p:'Pawn'};
+  const c = p.color === 'w' ? 'White' : 'Black';
+  return c + ' ' + (t[p.type] || 'Piece');
+}
+
+// ════════════════════════════════════════════
+// AUDIO — Web Audio API synthesized sounds
+// ════════════════════════════════════════════
+function ctx() {
+  if (!audioCtx) {
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  }
+  // Resume if suspended (browser autoplay policy)
+  if (audioCtx.state === 'suspended') audioCtx.resume();
+  return audioCtx;
+}
+
+function playMeow() {
+  const c = ctx(), now = c.currentTime;
+  const osc = c.createOscillator();
+  const g = c.createGain();
+  // Add vibrato
+  const lfo = c.createOscillator();
+  const lfoG = c.createGain();
+  lfo.frequency.value = 5;
+  lfoG.gain.value = 30;
+  lfo.connect(lfoG);
+  lfoG.connect(osc.frequency);
+  osc.connect(g); g.connect(c.destination);
+  osc.type = 'sine';
+  osc.frequency.setValueAtTime(550, now);
+  osc.frequency.linearRampToValueAtTime(920, now + 0.1);
+  osc.frequency.linearRampToValueAtTime(680, now + 0.25);
+  osc.frequency.linearRampToValueAtTime(440, now + 0.42);
+  g.gain.setValueAtTime(0, now);
+  g.gain.linearRampToValueAtTime(0.22, now + 0.06);
+  g.gain.linearRampToValueAtTime(0.18, now + 0.25);
+  g.gain.linearRampToValueAtTime(0, now + 0.48);
+  lfo.start(now); lfo.stop(now + 0.5);
+  osc.start(now); osc.stop(now + 0.5);
+}
+
+function playBark() {
+  const c = ctx(), now = c.currentTime;
+  // Noise burst filtered
+  const len = Math.floor(c.sampleRate * 0.12);
+  const buf = c.createBuffer(1, len, c.sampleRate);
+  const d = buf.getChannelData(0);
+  for (let i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
+  const n = c.createBufferSource(); n.buffer = buf;
+  const filt = c.createBiquadFilter(); filt.type = 'bandpass';
+  filt.frequency.value = 700; filt.Q.value = 1.5;
+  const gN = c.createGain();
+  gN.gain.setValueAtTime(0.5, now); gN.gain.linearRampToValueAtTime(0, now + 0.12);
+  n.connect(filt); filt.connect(gN); gN.connect(c.destination);
+  // Thump
+  const osc = c.createOscillator(); osc.type = 'sine';
+  const gO = c.createGain();
+  osc.frequency.setValueAtTime(200, now); osc.frequency.linearRampToValueAtTime(55, now + 0.18);
+  gO.gain.setValueAtTime(0.55, now); gO.gain.linearRampToValueAtTime(0, now + 0.22);
+  osc.connect(gO); gO.connect(c.destination);
+  n.start(now); n.stop(now + 0.14);
+  osc.start(now); osc.stop(now + 0.25);
+}
+
+function playChirp() {
+  const c = ctx(), now = c.currentTime;
+  for (let i = 0; i < 2; i++) {
+    const osc = c.createOscillator();
+    const g = c.createGain();
+    osc.connect(g); g.connect(c.destination);
+    osc.type = 'triangle';
+    const t = now + i * 0.1;
+    osc.frequency.setValueAtTime(1800 + i * 400, t);
+    osc.frequency.linearRampToValueAtTime(3200 + i * 300, t + 0.05);
+    osc.frequency.linearRampToValueAtTime(2000, t + 0.09);
+    g.gain.setValueAtTime(0.28, t);
+    g.gain.linearRampToValueAtTime(0, t + 0.1);
+    osc.start(t); osc.stop(t + 0.12);
+  }
+}
+
+function playExplosion() {
+  const c = ctx(), now = c.currentTime;
+  const dur = 0.9;
+  const len = Math.floor(c.sampleRate * dur);
+  const buf = c.createBuffer(1, len, c.sampleRate);
+  const d = buf.getChannelData(0);
+  for (let i = 0; i < len; i++) {
+    const env = Math.pow(1 - i / len, 1.8);
+    d[i] = (Math.random() * 2 - 1) * env;
+  }
+  const noise = c.createBufferSource(); noise.buffer = buf;
+  const lp = c.createBiquadFilter(); lp.type = 'lowpass';
+  lp.frequency.setValueAtTime(2000, now);
+  lp.frequency.linearRampToValueAtTime(120, now + 0.5);
+  const gN = c.createGain();
+  gN.gain.setValueAtTime(0.85, now); gN.gain.linearRampToValueAtTime(0, now + dur);
+  noise.connect(lp); lp.connect(gN); gN.connect(c.destination);
+  // Sub rumble
+  const sub = c.createOscillator(); sub.type = 'sine';
+  sub.frequency.setValueAtTime(90, now); sub.frequency.linearRampToValueAtTime(28, now + 0.45);
+  const gS = c.createGain();
+  gS.gain.setValueAtTime(0.6, now); gS.gain.linearRampToValueAtTime(0, now + 0.55);
+  sub.connect(gS); gS.connect(c.destination);
+  // Sharp attack click
+  const click = c.createOscillator(); click.type = 'square';
+  click.frequency.value = 60;
+  const gC = c.createGain();
+  gC.gain.setValueAtTime(0.7, now); gC.gain.linearRampToValueAtTime(0, now + 0.04);
+  click.connect(gC); gC.connect(c.destination);
+  noise.start(now); noise.stop(now + dur);
+  sub.start(now); sub.stop(now + 0.6);
+  click.start(now); click.stop(now + 0.05);
+}
+
+function playAnimal() {
+  const fns = [playMeow, playBark, playChirp];
+  fns[Math.floor(Math.random() * fns.length)]();
+}
+
+// ════════════════════════════════════════════
+// BOARD INIT & RENDER
+// ════════════════════════════════════════════
+function buildBoard() {
+  const board = document.getElementById('board');
+  board.innerHTML = '';
+
+  const ranks = ['8','7','6','5','4','3','2','1'];
+  const files = ['a','b','c','d','e','f','g','h'];
+
+  // Rank labels
+  const rankCol = document.getElementById('rankCol');
+  rankCol.innerHTML = '';
+  ranks.forEach(r => {
+    const s = document.createElement('span'); s.textContent = r;
+    rankCol.appendChild(s);
+  });
+
+  // File labels
+  const fileRow = document.getElementById('fileRow');
+  fileRow.innerHTML = '';
+  files.forEach(f => {
+    const s = document.createElement('span'); s.textContent = f;
+    fileRow.appendChild(s);
+  });
+
+  // Create squares
+  for (let ri = 0; ri < 8; ri++) {
+    for (let fi = 0; fi < 8; fi++) {
+      const sq = files[fi] + ranks[ri];
+      const isLight = (fi + ri) % 2 === 0;
+      const div = document.createElement('div');
+      div.className = 'sq ' + (isLight ? 'light' : 'dark');
+      div.dataset.sq = sq;
+      div.addEventListener('click', () => onSqClick(sq));
+      board.appendChild(div);
+    }
+  }
+  renderBoard();
+}
+
+function renderBoard() {
+  document.querySelectorAll('.sq').forEach(el => {
+    const sq = el.dataset.sq;
+    const piece = game.get(sq);
+
+    // Remove old piece
+    const old = el.querySelector('.piece');
+    if (old) old.remove();
+
+    // Add piece
+    if (piece) {
+      const span = document.createElement('span');
+      span.className = 'piece';
+      span.textContent = pieceChar(piece);
+      el.appendChild(span);
+    }
+
+    // Reset highlight classes (preserve light/dark)
+    el.classList.remove('selected','last-from','last-to','in-check','legal','legal-cap');
+
+    // Last move
+    if (lastMove) {
+      if (sq === lastMove.from) el.classList.add('last-from');
+      if (sq === lastMove.to)   el.classList.add('last-to');
+    }
+
+    // Check highlight
+    if (game.in_check()) {
+      const turn = game.turn();
+      const p = game.get(sq);
+      if (p && p.type === 'k' && p.color === turn) el.classList.add('in-check');
+    }
+  });
+
+  // Selected and legal moves
+  if (selSq) {
+    const selEl = document.querySelector(`[data-sq="${selSq}"]`);
+    if (selEl) selEl.classList.add('selected');
+    legalMvs.forEach(m => {
+      const el = document.querySelector(`[data-sq="${m.to}"]`);
+      if (!el) return;
+      el.classList.add(game.get(m.to) ? 'legal-cap' : 'legal');
+    });
+  }
+}
+
+// ════════════════════════════════════════════
+// CLICK HANDLER
+// ════════════════════════════════════════════
+function onSqClick(sq) {
+  if (game.game_over()) return;
+
+  const piece = game.get(sq);
+
+  if (selSq) {
+    // Try to execute the move
+    const mv = legalMvs.find(m => m.to === sq);
+    if (mv) {
+      if (mv.flags.includes('p')) {
+        pendingPromo = { from: selSq, to: sq };
+        showPromo();
+        return;
+      }
+      doPlayerMove({ from: selSq, to: sq });
+      return;
+    }
+    // Click on own piece — reselect
+    if (piece && piece.color === game.turn()) {
+      selSq = sq;
+      legalMvs = game.moves({ square: sq, verbose: true });
+      renderBoard();
+      return;
+    }
+    // Deselect
+    selSq = null; legalMvs = [];
+    renderBoard();
+    return;
+  }
+
+  // Select a piece
+  if (piece && piece.color === game.turn()) {
+    selSq = sq;
+    legalMvs = game.moves({ square: sq, verbose: true });
+    renderBoard();
+  }
+}
+
+// ════════════════════════════════════════════
+// PLAYER MOVE (changes turn)
+// ════════════════════════════════════════════
+function doPlayerMove(moveObj) {
+  const result = game.move(moveObj);
+  if (!result) return false;
+
+  lastMove = { from: result.from, to: result.to };
+  selSq = null; legalMvs = [];
+
+  handleMoveEffects(result, false);
+  renderBoard();
+  updateMoveHistory();
+  updateCaptures();
+  updateTurnUI();
+
+  if (game.game_over()) { clearTimer(); setTimeout(showGameOver, 350); return true; }
+
+  resetTimer();
+  // Maybe drift after 0.5s
+  setTimeout(maybeDrift, 500);
+  return true;
+}
+
+// ════════════════════════════════════════════
+// APPLY MOVE WITHOUT CHANGING TURN (drift/boredom)
+// Uses FEN manipulation to preserve whose turn it is.
+// ════════════════════════════════════════════
+function applyPhantomMove(from, to, promotion, pieceObj) {
+  const origTurn = game.turn();
+  const parts = game.fen().split(' ');
+
+  // If this piece's color differs from current turn, switch turn in FEN
+  if (pieceObj.color !== origTurn) {
+    parts[1] = pieceObj.color;
+    parts[3] = '-'; // clear en passant (may be invalid after switch)
+  } else {
+    parts[3] = '-';
+  }
+
+  const tempGame = new Chess(parts.join(' '));
+  const moveObj = { from, to };
+  if (promotion) moveObj.promotion = promotion;
+  const result = tempGame.move(moveObj);
+  if (!result) return null;
+
+  // Track captured pieces
+  if (result.captured) {
+    const cap = { type: result.captured, color: result.color === 'w' ? 'b' : 'w' };
+    if (result.color === 'w') capByW.push(cap);
+    else capByB.push(cap);
+  }
+
+  // Restore original turn in the new FEN
+  const newParts = tempGame.fen().split(' ');
+  newParts[1] = origTurn;
+  newParts[3] = '-';
+  game.load(newParts.join(' '));
+
+  lastMove = { from, to };
+  return result;
+}
+
+// ════════════════════════════════════════════
+// MOVE EFFECTS (sound, particles)
+// ════════════════════════════════════════════
+function handleMoveEffects(result, isCapture) {
+  const wasCapture = isCapture || (result.captured);
+  if (wasCapture) {
+    playExplosion();
+    const el = document.querySelector(`[data-sq="${result.to}"]`);
+    if (el) { el.classList.add('cap-flash'); spawnParticles(el); setTimeout(() => el.classList.remove('cap-flash'), 500); }
+    // Track captured for player moves
+    if (!isCapture && result.captured) {
+      const cap = { type: result.captured, color: result.color === 'w' ? 'b' : 'w' };
+      if (result.color === 'w') capByW.push(cap);
+      else capByB.push(cap);
+    }
+  } else if (result.flags && result.flags.includes('e')) {
+    // En passant
+    playExplosion();
+    const cap = { type: 'p', color: result.color === 'w' ? 'b' : 'w' };
+    if (result.color === 'w') capByW.push(cap);
+    else capByB.push(cap);
+  } else {
+    playAnimal();
+  }
+}
+
+// ════════════════════════════════════════════
+// PARTICLES
+// ════════════════════════════════════════════
+function spawnParticles(el) {
+  const colors = ['#e94560','#f5a623','#ffd700','#ff6b35','#c44dff','#00e5ff'];
+  for (let i = 0; i < 12; i++) {
+    const p = document.createElement('div');
+    p.className = 'particle';
+    p.style.cssText = `
+      background:${colors[i % colors.length]};
+      left:50%; top:50%;
+      --dx:${(Math.random()-0.5)*80}px;
+      --dy:${(Math.random()-0.5)*80}px;
+      animation-duration:${0.4 + Math.random()*0.35}s;
+    `;
+    el.appendChild(p);
+    setTimeout(() => p.remove(), 900);
+  }
+}
+
+// ════════════════════════════════════════════
+// DRIFT — 20% chance after a player move
+// ════════════════════════════════════════════
+function maybeDrift() {
+  if (game.game_over()) return;
+  if (Math.random() > 0.20) return;
+
+  const origTurn = game.turn();
+  const candidates = [];
+
+  for (const color of ['w','b']) {
+    const parts = game.fen().split(' ');
+    parts[1] = color; parts[3] = '-';
+    const tmp = new Chess(parts.join(' '));
+
+    for (const rank of '87654321') {
+      for (const file of 'abcdefgh') {
+        const sq = file + rank;
+        const piece = tmp.get(sq);
+        if (piece && piece.color === color) {
+          const moves = tmp.moves({ square: sq, verbose: true });
+          if (moves.length > 0) candidates.push({ sq, piece, moves });
+        }
+      }
+    }
+  }
+
+  if (!candidates.length) return;
+
+  const chosen = candidates[Math.floor(Math.random() * candidates.length)];
+  const mv = chosen.moves[Math.floor(Math.random() * chosen.moves.length)];
+  const promo = mv.flags && mv.flags.includes('p') ? 'q' : undefined;
+
+  const result = applyPhantomMove(chosen.sq, mv.to, promo, chosen.piece);
+  if (!result) return;
+
+  playAnimal();
+  renderBoard();
+  updateCaptures();
+  updateTurnUI();
+  addEvent(`✨ ${pieceName(chosen.piece)} had a mind of its own and drifted to ${mv.to}!`);
+}
+
+// ════════════════════════════════════════════
+// BOREDOM TIMER
+// ════════════════════════════════════════════
+function resetTimer() {
+  clearTimer();
+  timerSecs = 15;
+  paintTimer();
+  timerIv = setInterval(() => {
+    timerSecs--;
+    paintTimer();
+    if (timerSecs <= 0) { clearTimer(); boredomShuffle(); }
+  }, 1000);
+}
+
+function clearTimer() {
+  if (timerIv) { clearInterval(timerIv); timerIv = null; }
+}
+
+function paintTimer() {
+  const pct = (timerSecs / 15) * 100;
+  const bar = document.getElementById('timerBar');
+  bar.style.width = pct + '%';
+  bar.style.backgroundColor = pct > 60 ? '#4caf50' : pct > 30 ? '#ff9800' : '#f44336';
+  document.getElementById('timerLabel').textContent = timerSecs + 's';
+}
+
+function boredomShuffle() {
+  if (game.game_over()) return;
+  const turn = game.turn();
+  addEvent(`😴 ${turn === 'w' ? 'White' : 'Black'} was AFK — their pieces revolted!`);
+
+  // Gather moveable pieces for current player
+  const pieces = [];
+  for (const rank of '87654321') {
+    for (const file of 'abcdefgh') {
+      const sq = file + rank;
+      const piece = game.get(sq);
+      if (piece && piece.color === turn) {
+        const moves = game.moves({ square: sq, verbose: true });
+        if (moves.length > 0) pieces.push({ sq, piece, moves });
+      }
+    }
+  }
+  if (!pieces.length) { resetTimer(); return; }
+
+  const count = Math.min(1 + (Math.random() < 0.5 ? 1 : 0), pieces.length);
+  const chosen = pieces.sort(() => Math.random() - 0.5).slice(0, count);
+  selSq = null; legalMvs = [];
+
+  chosen.forEach(({ sq, piece }, idx) => {
+    setTimeout(() => {
+      if (game.game_over()) return;
+      // Re-fetch moves (state may have changed)
+      const parts = game.fen().split(' ');
+      parts[1] = piece.color; parts[3] = '-';
+      const tmp = new Chess(parts.join(' '));
+      const moves = tmp.moves({ square: sq, verbose: true });
+      if (!moves.length) return;
+
+      const mv = moves[Math.floor(Math.random() * moves.length)];
+      const promo = mv.flags && mv.flags.includes('p') ? 'q' : undefined;
+      const result = applyPhantomMove(sq, mv.to, promo, piece);
+      if (!result) return;
+
+      playAnimal();
+      renderBoard();
+      updateCaptures();
+      updateTurnUI();
+      addEvent(`😴 ${pieceName(piece)} got bored and wandered to ${mv.to}!`);
+
+      if (idx === chosen.length - 1) {
+        setTimeout(() => { if (!game.game_over()) resetTimer(); }, 200);
+      }
+    }, idx * 680);
+  });
+}
+
+// ════════════════════════════════════════════
+// UI UPDATES
+// ════════════════════════════════════════════
+function updateTurnUI() {
+  const t = game.turn();
+  const dot = document.getElementById('turnDot');
+  dot.className = 'turn-dot ' + t;
+  let txt;
+  if (game.in_checkmate())    txt = (t === 'w' ? 'Black' : 'White') + ' wins by checkmate! 👑';
+  else if (game.in_stalemate()) txt = 'Stalemate — nobody wins 🤝';
+  else if (game.in_draw())    txt = 'Draw! 🫱🫲';
+  else if (game.in_check())   txt = (t === 'w' ? 'White' : 'Black') + ' is in check ⚠️';
+  else                        txt = (t === 'w' ? 'White' : 'Black') + "'s Turn";
+  document.getElementById('turnText').textContent = txt;
+}
+
+function updateMoveHistory() {
+  const hist = game.history({ verbose: false });
+  const el = document.getElementById('moveHist');
+  el.innerHTML = '';
+  for (let i = 0; i < hist.length; i += 2) {
+    const row = document.createElement('div');
+    row.className = 'h-row';
+    row.innerHTML = `<span class="h-num">${Math.floor(i/2)+1}.</span>`
+      + `<span class="h-w">${hist[i] || ''}</span>`
+      + `<span class="h-b">${hist[i+1] || ''}</span>`;
+    el.appendChild(row);
+  }
+  el.scrollTop = el.scrollHeight;
+}
+
+function updateCaptures() {
+  document.getElementById('capW').innerHTML = capByW.map(p => pieceChar(p)).join('');
+  document.getElementById('capB').innerHTML = capByB.map(p => pieceChar(p)).join('');
+}
+
+function addEvent(msg) {
+  const el = document.getElementById('eLog');
+  const div = document.createElement('div');
+  div.className = 'elog-item'; div.textContent = msg;
+  el.appendChild(div); el.scrollTop = el.scrollHeight;
+}
+
+// ════════════════════════════════════════════
+// PROMOTION MODAL
+// ════════════════════════════════════════════
+function showPromo() {
+  const overlay = document.getElementById('promoOverlay');
+  const choices = document.getElementById('promoChoices');
+  choices.innerHTML = '';
+  const turn = game.turn();
+  const map = {
+    q: turn === 'w' ? '♕' : '♛',
+    r: turn === 'w' ? '♖' : '♜',
+    b: turn === 'w' ? '♗' : '♝',
+    n: turn === 'w' ? '♘' : '♞',
+  };
+  for (const [type, char] of Object.entries(map)) {
+    const btn = document.createElement('button');
+    btn.className = 'promo-btn'; btn.textContent = char;
+    btn.onclick = () => {
+      overlay.classList.remove('show');
+      doPlayerMove({ from: pendingPromo.from, to: pendingPromo.to, promotion: type });
+      pendingPromo = null;
+    };
+    choices.appendChild(btn);
+  }
+  overlay.classList.add('show');
+}
+
+// ════════════════════════════════════════════
+// GAME OVER
+// ════════════════════════════════════════════
+function showGameOver() {
+  const overlay = document.getElementById('gameOverOverlay');
+  const title   = document.getElementById('goTitle');
+  const msg     = document.getElementById('goMsg');
+  if (game.in_checkmate()) {
+    const w = game.turn() === 'w' ? 'Black' : 'White';
+    title.textContent = `${w} wins! 👑`;
+    msg.textContent   = `Checkmate! ${w} obliterated the opposition.`;
+  } else if (game.in_stalemate()) {
+    title.textContent = 'Stalemate! 🤝';
+    msg.textContent   = "Nobody wins. The pieces chose peace.";
+  } else if (game.in_draw()) {
+    title.textContent = 'Draw! 🫱🫲';
+    msg.textContent   = 'The game ended in a draw. Very diplomatic.';
+  } else {
+    title.textContent = 'Game Over';
+    msg.textContent   = 'The chaos has concluded.';
+  }
+  overlay.classList.add('show');
+}
+
+function resetGame() {
+  game = new Chess();
+  selSq = null; legalMvs = []; lastMove = null;
+  capByW = []; capByB = []; pendingPromo = null;
+  clearTimer();
+  document.getElementById('gameOverOverlay').classList.remove('show');
+  document.getElementById('promoOverlay').classList.remove('show');
+  document.getElementById('moveHist').innerHTML = '';
+  document.getElementById('eLog').innerHTML = '';
+  buildBoard();
+  updateTurnUI();
+  updateCaptures();
+  resetTimer();
+  addEvent('🎮 New game! Let the chaos begin...');
+}
+
+// ════════════════════════════════════════════
+// TRASH TALK CHAT
+// ════════════════════════════════════════════
+const WHITE_LINES = [
+  { e:'🎩', t:"Your opening is giving me secondhand embarrassment." },
+  { e:'🔭', t:"I've seen better strategy in a coin flip." },
+  { e:'😏', t:"Checked your king? Or just... vibing?" },
+  { e:'🤏', t:"That move was bold. I'll grant you that." },
+  { e:'🧐', t:"I expected more from the other side of the board." },
+  { e:'🫖', t:"My butler plays better than you on his day off." },
+  { e:'📜', t:"Fascinating. A completely suboptimal choice." },
+  { e:'😢', t:"One must pity the pieces under your command." },
+  { e:'💅', t:"Are you blundering on purpose? As an art form?" },
+  { e:'📚', t:"Perhaps chess is not your calling, darling." },
+];
+const BLACK_LINES = [
+  { e:'🐱', t:"My cat could play better than you." },
+  { e:'💀', t:"Bro really said 'chess is a thinking game' 💀" },
+  { e:'🤡', t:"Are you sure you meant to do that? 👀" },
+  { e:'😭', t:"That piece is literally crying rn." },
+  { e:'🚫', t:"This ain't it, chief." },
+  { e:'🤦', t:"Bro walked right into that one." },
+  { e:'🐛', t:"Is this a glitch or are you just bad?" },
+  { e:'😤', t:"The audacity. The nerve. The delusion." },
+  { e:'⛔', t:"Chess.com would ban you for this behavior." },
+  { e:'🙏', t:"Your pieces are literally begging to be captured." },
+];
+
+function setupChat() {
+  function makeButtons(lines, containerId, player) {
+    const el = document.getElementById(containerId);
+    lines.forEach(({ e, t }) => {
+      const btn = document.createElement('button');
+      btn.className = 'cb';
+      btn.textContent = e + ' ' + t.slice(0, 22) + (t.length > 22 ? '…' : '');
+      btn.title = t;
+      btn.onclick = () => sendChat(player, t);
+      el.appendChild(btn);
+    });
+  }
+  makeButtons(WHITE_LINES, 'wBtns', 'white');
+  makeButtons(BLACK_LINES, 'bBtns', 'black');
+}
+
+function sendChat(player, text) {
+  const log = document.getElementById('chatLog');
+  const el  = document.createElement('div');
+  el.className = `chat-msg ${player}`;
+  const time = new Date().toLocaleTimeString([], { hour:'2-digit', minute:'2-digit' });
+  el.innerHTML = `
+    <div class="chat-header">
+      <span class="chat-sender">${player === 'white' ? '⬜ White' : '⬛ Black'}</span>
+      <span class="chat-time">${time}</span>
+    </div>
+    <div class="chat-text">${text}</div>
+  `;
+  log.appendChild(el);
+  log.scrollTop = log.scrollHeight;
+}
+
+// ════════════════════════════════════════════
+// INIT
+// ════════════════════════════════════════════
+function init() {
+  buildBoard();
+  setupChat();
+  updateTurnUI();
+  resetTimer();
+  addEvent('🐾 Welcome to Super Chess — Chaos Edition!');
+  addEvent('⏱️ 15s per move or your pieces revolt. Good luck.');
+}
+
+window.addEventListener('load', init);
+</script>
+</body>
+</html>
