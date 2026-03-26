@@ -1,4 +1,5 @@
 import { Chess } from 'chess.js';
+import type { Square as CJSquare } from 'chess.js';
 import type { Color, Piece, PieceType, Square, Move, GameState, BoardState } from './types';
 
 export * from './types';
@@ -31,13 +32,13 @@ export class ChessEngine {
 
   legalMoves(square?: string): Move[] {
     const opts = square
-      ? { square: square as Square, verbose: true }
+      ? { square: square as CJSquare, verbose: true }
       : { verbose: true };
     return (this.chess.moves(opts) as unknown) as Move[];
   }
 
   get(square: string): Piece | null {
-    const p = this.chess.get(square as Square);
+    const p = this.chess.get(square as CJSquare);
     return p ? { type: p.type as PieceType, color: p.color as Color } : null;
   }
 

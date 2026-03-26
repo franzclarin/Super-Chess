@@ -1,4 +1,4 @@
-import express from 'express';
+import express, { type Request, type Response } from 'express';
 import { createServer } from 'http';
 import { Server } from 'socket.io';
 import cors from 'cors';
@@ -19,7 +19,7 @@ app.use(cors({ origin: CORS_ORIGIN }));
 app.use(express.json());
 
 // Health check
-app.get('/health', (_req, res) => res.json({ status: 'ok', uptime: process.uptime() }));
+app.get('/health', (_req: Request, res: Response) => res.json({ status: 'ok', uptime: process.uptime() }));
 
 const io = new Server(httpServer, {
   cors: { origin: CORS_ORIGIN, methods: ['GET', 'POST'] },
