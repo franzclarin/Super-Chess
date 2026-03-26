@@ -1,0 +1,142 @@
+.sidebar {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 260px;
+  max-width: 340px;
+}
+
+.panel {
+  background: var(--surface);
+  border-radius: 10px;
+  padding: 10px 12px;
+}
+
+.panel h3 {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--accent2);
+  margin-bottom: 7px;
+  padding-bottom: 5px;
+  border-bottom: 1px solid var(--surface3);
+}
+
+/* Turn */
+.turnRow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 6px;
+}
+.dot {
+  width: 16px; height: 16px; border-radius: 50%; flex-shrink: 0;
+}
+.dotW { background: #f5f5f5; border: 2px solid #999; }
+.dotB { background: #1a1a2e; border: 2px solid #666; }
+.turnText { font-size: 0.95rem; font-weight: 700; }
+
+/* Timer */
+.timerWrap {
+  background: var(--surface2);
+  border-radius: 6px;
+  height: 10px;
+  overflow: hidden;
+}
+.timerBar {
+  height: 100%;
+  border-radius: 6px;
+  transition: width 1s linear, background-color 0.5s;
+}
+.timerLabel {
+  font-size: 0.72rem;
+  color: var(--text-dim);
+  text-align: right;
+  margin-top: 3px;
+}
+
+/* Captured */
+.capRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1px;
+  min-height: 26px;
+  padding: 3px 5px;
+  background: var(--bg);
+  border-radius: 5px;
+  font-size: 1.1rem;
+}
+.capSep {
+  font-size: 0.62rem;
+  color: var(--text-dim);
+  text-align: center;
+  margin: 2px 0;
+}
+
+/* History */
+.histScroll {
+  max-height: 130px;
+  overflow-y: auto;
+  font-family: 'Cascadia Code', 'Consolas', monospace;
+  font-size: 0.8rem;
+}
+.hRow {
+  display: flex;
+  gap: 6px;
+  padding: 2px 4px;
+  border-radius: 3px;
+}
+.hRow:nth-child(even) { background: var(--surface2); }
+.hNum { color: var(--text-dim); min-width: 22px; }
+.hW, .hB { min-width: 54px; }
+
+/* Chaos log */
+.elog { max-height: 90px; overflow-y: auto; }
+.elogItem {
+  font-size: 0.76rem;
+  padding: 3px 7px;
+  border-left: 3px solid var(--accent2);
+  margin-bottom: 3px;
+  background: var(--bg);
+  border-radius: 0 4px 4px 0;
+  color: var(--accent2);
+  font-style: italic;
+}
+
+/* Chat */
+.chatLog { max-height: 150px; overflow-y: auto; margin-bottom: 8px; }
+.chatMsg {
+  padding: 5px 8px;
+  margin-bottom: 4px;
+  border-radius: 7px;
+  font-size: 0.8rem;
+  line-height: 1.4;
+}
+.chatMsgW { background: rgba(255,255,255,0.06); border-left: 3px solid #ccc; }
+.chatMsgB { background: rgba(124,77,255,0.12); border-left: 3px solid #7c4dff; }
+.chatHeader { display: flex; justify-content: space-between; margin-bottom: 2px; }
+.chatSender { font-size: 0.68rem; font-weight: 700; color: var(--text-dim); }
+.chatTime   { font-size: 0.62rem; color: var(--text-dim); }
+.chatText   { color: var(--text); }
+
+/* Chat buttons */
+.chatBtns { display: flex; flex-direction: column; gap: 7px; }
+.cbSection { display: flex; flex-direction: column; gap: 4px; }
+.cbLabel { font-size: 0.65rem; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.05em; }
+.cbRow { display: flex; flex-wrap: wrap; gap: 4px; }
+.cb {
+  background: var(--surface2);
+  border: 1px solid rgba(255,255,255,0.08);
+  color: var(--text);
+  padding: 3px 7px;
+  border-radius: 5px;
+  cursor: pointer;
+  font-size: 0.7rem;
+  transition: background 0.15s, border-color 0.15s;
+  white-space: nowrap;
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.cb:hover { background: var(--accent); border-color: var(--accent); }

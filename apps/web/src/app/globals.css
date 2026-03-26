@@ -1,0 +1,55 @@
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --sq: 68px;
+  --bg: #0d0d1a;
+  --surface: #161628;
+  --surface2: #1e1e38;
+  --surface3: #252545;
+  --accent: #e94560;
+  --accent2: #f5a623;
+  --accent3: #7c4dff;
+  --text: #e8e8f0;
+  --text-dim: #7070a0;
+  --light-sq: #f0d9b5;
+  --dark-sq: #b58863;
+}
+
+html, body {
+  height: 100%;
+  background: var(--bg);
+  color: var(--text);
+  font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+a { color: inherit; text-decoration: none; }
+button { font-family: inherit; }
+
+/* Scrollbars */
+::-webkit-scrollbar { width: 5px; height: 5px; }
+::-webkit-scrollbar-track { background: var(--bg); }
+::-webkit-scrollbar-thumb { background: var(--surface3); border-radius: 3px; }
+
+/* Responsive sq size */
+@media (max-width: 880px) { :root { --sq: 50px; } }
+@media (max-width: 480px) { :root { --sq: 40px; } }
+
+/* Layout helpers */
+.game-layout {
+  display: flex;
+  flex: 1;
+  gap: 14px;
+  padding: 14px;
+  max-width: 1280px;
+  margin: 0 auto;
+  width: 100%;
+  align-items: flex-start;
+}
+
+@media (max-width: 880px) {
+  .game-layout {
+    flex-direction: column;
+    align-items: center;
+  }
+}
