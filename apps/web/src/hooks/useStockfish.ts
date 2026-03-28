@@ -23,9 +23,10 @@ export function useStockfish(): UseStockfish {
     async function init() {
       try {
         // Fetch stockfish.js and create a blob worker (avoids CORS issues)
-        const res = await fetch(
-          'https://cdnjs.cloudflare.com/ajax/libs/stockfish.js/10.0.2/stockfish.js'
-        );
+        // BUG-011: URL is configurable via NEXT_PUBLIC_STOCKFISH_URL env var
+        const stockfishUrl = process.env.NEXT_PUBLIC_STOCKFISH_URL ??
+          'https://cdnjs.cloudflare.com/ajax/libs/stockfish.js/10.0.2/stockfish.js';
+        const res = await fetch(stockfishUrl);
         if (!res.ok) throw new Error('Failed to load Stockfish');
         const text = await res.text();
         const blob = new Blob([text], { type: 'application/javascript' });

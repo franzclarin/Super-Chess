@@ -1,5 +1,5 @@
 'use client';
-import { useReducer, useEffect, useRef, useCallback } from 'react';
+import { useReducer, useEffect, useRef, useCallback, useMemo } from 'react';
 import { ChessEngine, applyPhantomMove } from '@super-chess/chess-core';
 import type { Color, Piece, Square, Move, ChatMessage } from '@super-chess/chess-core';
 import { playAnimal, playExplosion } from '@/lib/sounds';
@@ -12,6 +12,7 @@ export interface LocalGameState {
   selectedSquare: Square | null;
   legalTargets: Square[];
   lastMove: { from: Square; to: Square } | null;
+  lastCaptureSq: Square | null;
   capturedByWhite: Piece[];
   capturedByBlack: Piece[];
   timerSeconds: number;
@@ -56,6 +57,7 @@ function reducer(state: LocalGameState, action: Action): LocalGameState {
         selectedSquare: null,
         legalTargets: [],
         lastMove: { from: action.from, to: action.to },
+        lastCaptureSq: action.captured ? action.to : null,
         capturedByWhite: capW,
         capturedByBlack: capB,
         pendingPromotion: null,
@@ -73,6 +75,7 @@ function reducer(state: LocalGameState, action: Action): LocalGameState {
         ...state,
         fen: action.fen,
         lastMove: { from: action.from, to: action.to },
+        lastCaptureSq: action.captured ? action.to : state.lastCaptureSq,
         capturedByWhite: capW,
         capturedByBlack: capB,
       };
@@ -104,6 +107,7 @@ function initialState(): LocalGameState {
     selectedSquare: null,
     legalTargets: [],
     lastMove: null,
+    lastCaptureSq: null,
     capturedByWhite: [],
     capturedByBlack: [],
     timerSeconds: 15,
@@ -123,6 +127,8 @@ export function useLocalGame() {
   const engineRef = useRef<ChessEngine>(new ChessEngine());
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const driftTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // BUG-013: prevent concurrent engine mutations between boredom and drift
+  const boredomActiveRef = useRef(false);
 
   const engine = engineRef.current;
 
@@ -140,13 +146,14 @@ export function useLocalGame() {
   }, []);
 
   // Watch timerSeconds for boredom trigger
+  // BUG-007: also guard against pendingPromotion
   useEffect(() => {
-    if (state.timerSeconds === 0 && !state.isOver) {
+    if (state.timerSeconds === 0 && !state.isOver && !state.pendingPromotion) {
       stopTimer();
       doBoredomShuffle();
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [state.timerSeconds, state.isOver]);
+  }, [state.timerSeconds, state.isOver, state.pendingPromotion]);
 
   // ── Helpers ──────────────────────────────────────────────────────────────
   function addEvent(msg: string) { dispatch({ type: 'ADD_EVENT', msg }); }
@@ -166,6 +173,8 @@ export function useLocalGame() {
 
   function maybeDrift() {
     if (engine.isGameOver) return;
+    // BUG-013: skip drift if boredom shuffle is in progress
+    if (boredomActiveRef.current) return;
     if (Math.random() > 0.20) return;
 
     const candidates: Array<{ sq: Square; piece: Piece; moves: Move[] }> = [];
@@ -208,6 +217,10 @@ export function useLocalGame() {
 
   function doBoredomShuffle() {
     if (engine.isGameOver) return;
+    // BUG-013: mark boredom active and cancel any pending drift
+    boredomActiveRef.current = true;
+    if (driftTimeout.current) { clearTimeout(driftTimeout.current); driftTimeout.current = null; }
+
     const turn = engine.turn;
     addEvent(`😴 ${turn === 'w' ? 'White' : 'Black'} was AFK — their pieces revolted!`);
 
@@ -222,24 +235,37 @@ export function useLocalGame() {
         }
       }
     }
-    if (!pieces.length) { startTimer(); return; }
+    if (!pieces.length) { boredomActiveRef.current = false; startTimer(); return; }
 
     const count = Math.min(1 + (Math.random() < 0.5 ? 1 : 0), pieces.length);
     const chosen = [...pieces].sort(() => Math.random() - 0.5).slice(0, count);
 
     chosen.forEach(({ sq, piece }, idx) => {
       setTimeout(() => {
-        if (engine.isGameOver) return;
+        const isLast = idx === chosen.length - 1;
+        if (engine.isGameOver) {
+          if (isLast) boredomActiveRef.current = false;
+          return;
+        }
         const parts = engine.fen.split(' ');
         parts[1] = piece.color; parts[3] = '-';
         const tmp = new ChessEngine();
         tmp.load(parts.join(' '));
+
+        // BUG-012: verify the piece is still at its original square before moving
+        const currentPiece = tmp.get(sq);
+        if (!currentPiece || currentPiece.type !== piece.type || currentPiece.color !== piece.color) {
+          if (isLast) { boredomActiveRef.current = false; startTimer(); }
+          return;
+        }
+
         const mvs = tmp.legalMoves(sq);
-        if (!mvs.length) return;
+        if (!mvs.length) { if (isLast) { boredomActiveRef.current = false; startTimer(); } return; }
         const mv = mvs[Math.floor(Math.random() * mvs.length)];
         const promo = mv.flags?.includes('p') ? 'q' : undefined;
         const result = applyPhantomMove(engine, sq, mv.to as Square, piece.color, promo);
-        if (!result) return;
+        // BUG-009: always restart timer on last piece even if phantom move fails
+        if (!result) { if (isLast) { boredomActiveRef.current = false; startTimer(); } return; }
 
         playAnimal();
         dispatch({ type: 'PHANTOM_DONE', fen: engine.fen, from: sq, to: mv.to as Square, captured: result.capturedPiece });
@@ -247,7 +273,7 @@ export function useLocalGame() {
         addEvent(`😴 ${pName} got bored and wandered to ${mv.to}!`);
         checkGameOver();
 
-        if (idx === chosen.length - 1) { startTimer(); }
+        if (isLast) { boredomActiveRef.current = false; startTimer(); }
       }, idx * 700);
     });
   }
@@ -328,6 +354,7 @@ export function useLocalGame() {
   const onReset = useCallback(() => {
     stopTimer();
     if (driftTimeout.current) clearTimeout(driftTimeout.current);
+    boredomActiveRef.current = false;
     engineRef.current = new ChessEngine();
     dispatch({ type: 'RESET', fen: engineRef.current.fen });
     setTimeout(startTimer, 100);
@@ -342,8 +369,8 @@ export function useLocalGame() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Derive board from FEN
-  const derivedEngine = new ChessEngine(state.fen);
+  // BUG-016: memoize derivedEngine so it is not re-instantiated on every render/tick
+  const derivedEngine = useMemo(() => new ChessEngine(state.fen), [state.fen]);
 
   return {
     // Board state
@@ -361,6 +388,7 @@ export function useLocalGame() {
     selectedSquare: state.selectedSquare,
     legalTargets: state.legalTargets,
     lastMove: state.lastMove,
+    lastCaptureSq: state.lastCaptureSq,
     capturedByWhite: state.capturedByWhite,
     capturedByBlack: state.capturedByBlack,
     timerSeconds: state.timerSeconds,
@@ -369,10 +397,13 @@ export function useLocalGame() {
     pendingPromotion: state.pendingPromotion,
     moveHistory: derivedEngine.getHistory(false) as unknown as string[],
     // Actions
+    applyMove,
     onSquareClick,
     onPromotion,
     onTrashTalk,
     onReset,
+    startTimer,
+    stopTimer,
     mode: 'local' as const,
   };
 }

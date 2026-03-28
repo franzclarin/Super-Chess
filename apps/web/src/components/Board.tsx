@@ -1,5 +1,5 @@
 'use client';
-import { useRef, useCallback } from 'react';
+import { useRef, useCallback, useEffect } from 'react';
 import type { ChessEngine, Color, Square } from '@super-chess/chess-core';
 import { UNICODE, FILES, RANKS } from '@/lib/constants';
 import s from './Board.module.css';
@@ -9,6 +9,7 @@ interface BoardProps {
   selectedSquare: Square | null;
   legalTargets: Square[];
   lastMove: { from: Square; to: Square } | null;
+  lastCaptureSq?: Square | null;
   onSquareClick: (sq: Square) => void;
   mode: 'local' | 'online' | 'bot';
   humanColor?: Color;
@@ -22,6 +23,7 @@ export function Board({
   selectedSquare,
   legalTargets,
   lastMove,
+  lastCaptureSq,
   onSquareClick,
   mode,
   humanColor,
@@ -43,7 +45,6 @@ export function Board({
     }
   }, []);
 
-  // Expose capture flash to parent via dataset
   const triggerCapture = useCallback((sq: Square) => {
     const el = squareRefs.current.get(sq);
     if (!el) return;
@@ -51,6 +52,11 @@ export function Board({
     spawnParticles(el);
     setTimeout(() => el.classList.remove(s.capFlash), 500);
   }, [spawnParticles]);
+
+  // BUG-006: fire capture animation whenever lastCaptureSq changes to a non-null value
+  useEffect(() => {
+    if (lastCaptureSq) triggerCapture(lastCaptureSq);
+  }, [lastCaptureSq, triggerCapture]);
 
   const turn = engine.turn;
   const inCheckSqs = new Set<string>();
@@ -70,19 +76,23 @@ export function Board({
   const modeLabels = { local: 'LOCAL', online: 'ONLINE', bot: `BOT${botLabel ? ` · ${botLabel}` : ''}` };
   const modeClass = { local: s.badgeLocal, online: s.badgeOnline, bot: s.badgeBot };
 
+  // BUG-003: flip board for black player
+  const displayRanks = humanColor === 'b' ? [...RANKS].reverse() : [...RANKS];
+  const displayFiles = humanColor === 'b' ? [...FILES].reverse() : [...FILES];
+
   return (
     <div className={s.wrap}>
       <span className={`${s.modeBadge} ${modeClass[mode]}`}>{modeLabels[mode]}</span>
       <div className={s.inner}>
         <div className={s.rankCol}>
-          {RANKS.map(r => (
+          {displayRanks.map(r => (
             <div key={r} className={s.rankLabel}>{r}</div>
           ))}
         </div>
         <div className={s.boardCol}>
           <div className={s.grid}>
-            {RANKS.map((rank, ri) =>
-              FILES.map((file, fi) => {
+            {displayRanks.map((rank, ri) =>
+              displayFiles.map((file, fi) => {
                 const sq = file + rank;
                 const piece = engine.get(sq);
                 const isLight = (fi + ri) % 2 === 0;
@@ -125,7 +135,7 @@ export function Board({
             )}
           </div>
           <div className={s.fileRow}>
-            {FILES.map(f => (
+            {displayFiles.map(f => (
               <div key={f} className={s.fileLabel}>{f}</div>
             ))}
           </div>

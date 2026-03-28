@@ -102,7 +102,7 @@ function Lobby({ game }: { game: ReturnType<typeof useOnlineGame> }) {
             <button
               style={ctaStyle}
               disabled={game.connectionStatus !== 'connected'}
-              onClick={() => game.createRoom()}
+              onClick={() => game.createRoom(playerName)}
             >
               Create Room →
             </button>
@@ -147,7 +147,7 @@ function Lobby({ game }: { game: ReturnType<typeof useOnlineGame> }) {
             <button
               style={ctaStyle}
               disabled={game.connectionStatus !== 'connected' || !joinCode.includes('-')}
-              onClick={() => game.joinRoom(joinCode)}
+              onClick={() => game.joinRoom(joinCode, playerName)}
             >
               Join Room →
             </button>
@@ -198,6 +198,7 @@ export default function OnlinePage() {
           onSquareClick={game.onSquareClick}
           mode="online"
           humanColor={game.playerColor ?? 'w'}
+          lastCaptureSq={game.lastCaptureSq}
         />
         <Sidebar
           turn={game.turn}

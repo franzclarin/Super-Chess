@@ -1,5 +1,5 @@
 'use client';
-import { useReducer, useEffect, useRef, useCallback } from 'react';
+import { useReducer, useEffect, useRef, useCallback, useMemo } from 'react';
 import { io, Socket } from 'socket.io-client';
 import { ChessEngine, applyPhantomMove } from '@super-chess/chess-core';
 import type { Color, Piece, Square, ChatMessage } from '@super-chess/chess-core';
@@ -14,6 +14,7 @@ export interface OnlineGameState {
   selectedSquare: Square | null;
   legalTargets: Square[];
   lastMove: { from: Square; to: Square } | null;
+  lastCaptureSq: Square | null;
   capturedByWhite: Piece[];
   capturedByBlack: Piece[];
   timerSeconds: number;
@@ -69,7 +70,8 @@ function reducer(state: OnlineGameState, action: Action): OnlineGameState {
         lobbyStatus: 'active',
         isOver: false, winner: null, overReason: null,
         selectedSquare: null, legalTargets: [],
-        lastMove: null, capturedByWhite: [], capturedByBlack: [],
+        lastMove: null, lastCaptureSq: null,
+        capturedByWhite: [], capturedByBlack: [],
         events: ['🌐 Game started! May chaos reign...'],
         chatMessages: [], timerSeconds: 15,
         rematchOffered: false, opponentDisconnected: false,
@@ -80,12 +82,24 @@ function reducer(state: OnlineGameState, action: Action): OnlineGameState {
     case 'MOVE_APPLIED': {
       const capW = action.mover === 'w' && action.captured ? [...state.capturedByWhite, action.captured] : state.capturedByWhite;
       const capB = action.mover === 'b' && action.captured ? [...state.capturedByBlack, action.captured] : state.capturedByBlack;
-      return { ...state, fen: action.fen, selectedSquare: null, legalTargets: [], lastMove: { from: action.from, to: action.to }, capturedByWhite: capW, capturedByBlack: capB, pendingPromotion: null, timerSeconds: 15 };
+      return {
+        ...state, fen: action.fen,
+        selectedSquare: null, legalTargets: [],
+        lastMove: { from: action.from, to: action.to },
+        lastCaptureSq: action.captured ? action.to : null,
+        capturedByWhite: capW, capturedByBlack: capB,
+        pendingPromotion: null, timerSeconds: 15,
+      };
     }
     case 'PHANTOM_APPLIED': {
       const capW = action.captured?.color === 'b' ? [...state.capturedByWhite, action.captured] : state.capturedByWhite;
       const capB = action.captured?.color === 'w' ? [...state.capturedByBlack, action.captured] : state.capturedByBlack;
-      return { ...state, fen: action.fen, lastMove: { from: action.from, to: action.to }, capturedByWhite: capW, capturedByBlack: capB };
+      return {
+        ...state, fen: action.fen,
+        lastMove: { from: action.from, to: action.to },
+        lastCaptureSq: action.captured ? action.to : state.lastCaptureSq,
+        capturedByWhite: capW, capturedByBlack: capB,
+      };
     }
     case 'SET_PENDING_PROMO': return { ...state, pendingPromotion: { from: action.from, to: action.to }, selectedSquare: null, legalTargets: [] };
     case 'CANCEL_PROMO': return { ...state, pendingPromotion: null };
@@ -107,7 +121,8 @@ function initialState(playerName = 'Player'): OnlineGameState {
   return {
     fen: new ChessEngine().fen,
     selectedSquare: null, legalTargets: [],
-    lastMove: null, capturedByWhite: [], capturedByBlack: [],
+    lastMove: null, lastCaptureSq: null,
+    capturedByWhite: [], capturedByBlack: [],
     timerSeconds: 15, events: [], chatMessages: [],
     pendingPromotion: null, isOver: false, winner: null, overReason: null,
     roomCode: null, playerColor: null,
@@ -124,6 +139,8 @@ export function useOnlineGame(playerName = 'Player') {
   const socketRef = useRef<Socket | null>(null);
   const engineRef = useRef<ChessEngine>(new ChessEngine());
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  // BUG-008: ref to capture playerColor immediately on room-joined, bypassing React batching lag
+  const playerColorRef = useRef<Color | null>(null);
 
   const startTimer = useCallback(() => {
     if (timerRef.current) clearInterval(timerRef.current);
@@ -156,10 +173,13 @@ export function useOnlineGame(playerName = 'Player') {
     socket.on('connect_error', () => dispatch({ type: 'SET_CONNECTION', status: 'error' }));
 
     socket.on('room-created', ({ roomId, color }: { roomId: string; color: Color }) => {
+      playerColorRef.current = color;
       dispatch({ type: 'ROOM_CREATED', code: roomId, color });
     });
 
     socket.on('room-joined', ({ color, opponentName }: { color: Color; opponentName: string }) => {
+      // BUG-008: store color in ref immediately so game-start handler sees it even before state commits
+      playerColorRef.current = color;
       dispatch({ type: 'GAME_START', fen: engineRef.current.fen, white: opponentName, black: playerName, playerColor: color });
     });
 
@@ -169,7 +189,8 @@ export function useOnlineGame(playerName = 'Player') {
 
     socket.on('game-start', ({ fen, white, black }: { fen: string; white: string; black: string }) => {
       engineRef.current.load(fen);
-      dispatch({ type: 'GAME_START', fen, white, black, playerColor: state.playerColor ?? 'w' });
+      // BUG-008: use playerColorRef instead of state.playerColor to avoid race condition
+      dispatch({ type: 'GAME_START', fen, white, black, playerColor: playerColorRef.current ?? 'w' });
       startTimer();
     });
 
@@ -223,14 +244,17 @@ export function useOnlineGame(playerName = 'Player') {
   }, []);
 
   // ── Actions ──────────────────────────────────────────────────────────────
-  const createRoom = useCallback(() => {
+  // BUG-002: accept name param so lobby form can pass the typed name through
+  const createRoom = useCallback((name?: string) => {
+    const nameToUse = name?.trim() || playerName;
     dispatch({ type: 'SET_LOBBY', status: 'creating' });
-    socketRef.current?.emit('create-room', { playerName });
+    socketRef.current?.emit('create-room', { playerName: nameToUse });
   }, [playerName]);
 
-  const joinRoom = useCallback((code: string) => {
+  const joinRoom = useCallback((code: string, name?: string) => {
+    const nameToUse = name?.trim() || playerName;
     dispatch({ type: 'SET_LOBBY', status: 'joining' });
-    socketRef.current?.emit('join-room', { roomId: code.toUpperCase(), playerName });
+    socketRef.current?.emit('join-room', { roomId: code.toUpperCase(), playerName: nameToUse });
   }, [playerName]);
 
   const onSquareClick = useCallback((sq: Square) => {
@@ -290,12 +314,21 @@ export function useOnlineGame(playerName = 'Player') {
     socketRef.current?.emit('rematch-accept', { roomId: state.roomCode });
   }, [state.roomCode]);
 
+  // BUG-010: disconnect and reconnect the socket on reset so old room events stop arriving
   const onReset = useCallback(() => {
+    const socket = socketRef.current;
+    if (socket) {
+      if (state.roomCode) socket.emit('leave-room', { roomId: state.roomCode });
+      socket.disconnect();
+      socket.connect();
+    }
+    playerColorRef.current = null;
     dispatch({ type: 'RESET' });
     engineRef.current = new ChessEngine();
-  }, []);
+  }, [state.roomCode]);
 
-  const derivedEngine = new ChessEngine(state.fen);
+  // BUG-016: memoize derivedEngine so it is not re-instantiated on every render/tick
+  const derivedEngine = useMemo(() => new ChessEngine(state.fen), [state.fen]);
 
   return {
     engine: derivedEngine,
@@ -311,6 +344,7 @@ export function useOnlineGame(playerName = 'Player') {
     selectedSquare: state.selectedSquare,
     legalTargets: state.legalTargets,
     lastMove: state.lastMove,
+    lastCaptureSq: state.lastCaptureSq,
     capturedByWhite: state.capturedByWhite,
     capturedByBlack: state.capturedByBlack,
     timerSeconds: state.timerSeconds,

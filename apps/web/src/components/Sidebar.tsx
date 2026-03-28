@@ -48,7 +48,6 @@ export function Sidebar({
   else if (isDraw) turnText = 'Draw 🫱🫲';
   else if (inCheck) turnText = (turn === 'w' ? 'White' : 'Black') + ' is in check ⚠️';
 
-  const now = new Date();
   const fmt = (ts: number) => new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
   return (

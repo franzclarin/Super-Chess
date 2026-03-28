@@ -164,6 +164,7 @@ function BotGameView({
           mode="bot"
           humanColor={humanColor}
           botLabel={`${info.icon} ${info.name}`}
+          lastCaptureSq={game.lastCaptureSq}
         />
         <Sidebar
           turn={game.turn}

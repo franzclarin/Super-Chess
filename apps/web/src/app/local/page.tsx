@@ -23,6 +23,7 @@ export default function LocalPage() {
           lastMove={game.lastMove}
           onSquareClick={game.onSquareClick}
           mode="local"
+          lastCaptureSq={game.lastCaptureSq}
         />
         <Sidebar
           turn={game.turn}
