@@ -5,7 +5,7 @@ import cors from 'cors';
 import {
   createRoom, joinRoom, getRoom, applyMove, applyChaosEvent,
   applyBoredomShuffle, startRematch, markDisconnected, markReconnected,
-  getRoomBySocketId,
+  getRoomBySocketId, resetBoredomTimer, clearBoredomTimer,
 } from './rooms';
 import type { Color } from '@super-chess/chess-core';
 
@@ -23,12 +23,20 @@ app.get('/health', (_req: Request, res: Response) => res.json({ status: 'ok', up
 
 const io = new Server(httpServer, {
   cors: { origin: CORS_ORIGIN, methods: ['GET', 'POST'] },
-  // Enable sticky-session friendly transports
   transports: ['websocket', 'polling'],
 });
 
 // Per-socket rate limit: max 1 move per 500ms
 const moveCooldowns = new Map<string, number>();
+
+// Helper: start/reset the server-side boredom timer for a room and broadcast results
+function startBoredom(roomId: string) {
+  resetBoredomTimer(roomId, (results) => {
+    for (const chaos of results) {
+      io.to(roomId).emit('chaos-applied', chaos);
+    }
+  });
+}
 
 io.on('connection', (socket) => {
   // ── Create Room ────────────────────────────────────────────────────────
@@ -52,12 +60,12 @@ io.on('connection', (socket) => {
     socket.data.roomId = roomId;
     socket.data.color = 'b' as Color;
 
-    // Notify joiner
+    // Notify joiner of their color
     socket.emit('room-joined', {
       color: 'b',
       opponentName: room.players.w?.name ?? 'Opponent',
     });
-    // Notify creator
+    // Notify creator that opponent joined
     socket.to(roomId).emit('opponent-joined', {
       opponentName: playerName ?? 'Player 2',
       color: 'b',
@@ -68,6 +76,8 @@ io.on('connection', (socket) => {
       white: room.players.w?.name ?? 'White',
       black: room.players.b?.name ?? 'Black',
     });
+    // Start server-side boredom timer
+    startBoredom(roomId);
   });
 
   // ── Move ───────────────────────────────────────────────────────────────
@@ -82,7 +92,7 @@ io.on('connection', (socket) => {
 
     const result = applyMove(roomId, socket.id, from, to, promotion);
     if (!result.ok) {
-      socket.emit('error', { message: result.error });
+      socket.emit('move-rejected', { message: result.error });
       return;
     }
 
@@ -91,6 +101,7 @@ io.on('connection', (socket) => {
     // Check game over
     const room = getRoom(roomId);
     if (room?.engine.isGameOver) {
+      clearBoredomTimer(roomId);
       const engine = room.engine;
       let winner: Color | null = null;
       let reason: 'checkmate' | 'stalemate' | 'draw' = 'draw';
@@ -101,6 +112,7 @@ io.on('connection', (socket) => {
         reason = 'stalemate';
       }
       io.to(roomId).emit('game-over', { reason, winner });
+      return;
     }
 
     // 20% drift after every move (server-authoritative)
@@ -110,16 +122,13 @@ io.on('connection', (socket) => {
         if (chaos) io.to(roomId).emit('chaos-applied', chaos);
       }, 600);
     }
+
+    // Reset server-side boredom timer after each move
+    startBoredom(roomId);
   });
 
-  // ── Boredom Shuffle (client signals timer expired) ─────────────────────
-  socket.on('chaos-request', ({ roomId }: { roomId: string }) => {
-    const color = socket.data.color as Color;
-    const results = applyBoredomShuffle(roomId, color);
-    for (const chaos of results) {
-      io.to(roomId).emit('chaos-applied', chaos);
-    }
-  });
+  // ── Boredom (client signal kept for backwards compat, no-op now) ───────
+  socket.on('chaos-request', () => { /* server-side timer handles boredom now */ });
 
   // ── Chat ───────────────────────────────────────────────────────────────
   socket.on('chat-message', ({ roomId, player, text }: {
@@ -131,12 +140,13 @@ io.on('connection', (socket) => {
   // ── Resign ─────────────────────────────────────────────────────────────
   socket.on('resign', ({ roomId }: { roomId: string }) => {
     const color = socket.data.color as Color;
+    clearBoredomTimer(roomId);
+    const room = getRoom(roomId);
+    if (room) room.status = 'finished';
     io.to(roomId).emit('game-over', {
       reason: 'resign',
       winner: color === 'w' ? 'b' : 'w',
     });
-    const room = getRoom(roomId);
-    if (room) room.status = 'finished';
   });
 
   // ── Rematch ────────────────────────────────────────────────────────────
@@ -150,12 +160,19 @@ io.on('connection', (socket) => {
     if (ready) {
       const room = getRoom(roomId);
       if (room) {
+        // C-2: tell each socket its new (swapped) color before game-start fires
+        const wSock = io.sockets.sockets.get(room.players.w?.socketId ?? '');
+        const bSock = io.sockets.sockets.get(room.players.b?.socketId ?? '');
+        if (wSock) { wSock.data.color = 'w'; wSock.emit('color-assigned', { color: 'w' }); }
+        if (bSock) { bSock.data.color = 'b'; bSock.emit('color-assigned', { color: 'b' }); }
+
         io.to(roomId).emit('rematch-accepted', { fen: room.fen });
         io.to(roomId).emit('game-start', {
           fen: room.fen,
           white: room.players.w?.name ?? 'White',
           black: room.players.b?.name ?? 'Black',
         });
+        startBoredom(roomId);
       }
     }
   });
@@ -183,9 +200,14 @@ io.on('connection', (socket) => {
     moveCooldowns.delete(socket.id);
     const roomId = socket.data.roomId as string | undefined;
     if (roomId) {
-      socket.to(roomId).emit('opponent-disconnected');
+      // m-2: only notify opponent if game is still active (not already resigned/over)
+      const room = getRoom(roomId);
+      if (room && room.status === 'active') {
+        socket.to(roomId).emit('opponent-disconnected');
+      }
     }
     markDisconnected(socket.id, (expiredRoomId, abandonedColor) => {
+      clearBoredomTimer(expiredRoomId);
       io.to(expiredRoomId).emit('game-over', {
         reason: 'abandonment',
         winner: abandonedColor === 'w' ? 'b' : 'w',

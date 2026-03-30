@@ -1,13 +1,15 @@
 import { ChessEngine, applyPhantomMove } from '@super-chess/chess-core';
-import type { Color, Piece, Square, RoomState, RoomPlayer, PhantomResult } from '@super-chess/chess-core';
+import type { Color, Piece, Square, RoomState, PhantomResult } from '@super-chess/chess-core';
 
 const ROOM_EXPIRY_MS = Number(process.env.ROOM_EXPIRY_MS ?? 600_000); // 10 min
 const RECONNECT_WINDOW_MS = Number(process.env.RECONNECT_WINDOW_MS ?? 30_000);
+const BOREDOM_MS = Number(process.env.BOREDOM_MS ?? 15_000);
 
 interface ServerRoom extends RoomState {
   engine: ChessEngine;
   pendingRematch: Set<Color>;
   disconnectTimers: Map<Color, ReturnType<typeof setTimeout>>;
+  boredomTimer: ReturnType<typeof setTimeout> | null;
 }
 
 const rooms = new Map<string, ServerRoom>();
@@ -17,6 +19,7 @@ setInterval(() => {
   const now = Date.now();
   for (const [id, room] of rooms) {
     if (now - room.lastActivityAt > ROOM_EXPIRY_MS) {
+      if (room.boredomTimer) clearTimeout(room.boredomTimer);
       rooms.delete(id);
     }
   }
@@ -46,6 +49,7 @@ export function createRoom(socketId: string, playerName: string): ServerRoom {
     engine: new ChessEngine(),
     pendingRematch: new Set(),
     disconnectTimers: new Map(),
+    boredomTimer: null,
   };
   rooms.set(id, room);
   return room;
@@ -116,7 +120,6 @@ export function applyChaosEvent(roomId: string): ChaosResult | null {
 
   const engine = room.engine;
 
-  // Collect all pieces from both sides
   const candidates: Array<{ sq: Square; piece: Piece; moves: ReturnType<ChessEngine['legalMoves']> }> = [];
 
   for (const color of ['w', 'b'] as Color[]) {
@@ -178,7 +181,6 @@ export function applyBoredomShuffle(
   const engine = room.engine;
   const results: ChaosResult[] = [];
 
-  // Gather moveable pieces for this color
   const pieces: Array<{ sq: Square; piece: Piece }> = [];
   for (const rank of '87654321') {
     for (const file of 'abcdefgh') {
@@ -231,6 +233,36 @@ export function applyBoredomShuffle(
   return results;
 }
 
+// ── Server-side boredom timer ────────────────────────────────────────────────
+
+export function resetBoredomTimer(
+  roomId: string,
+  onExpire: (results: ChaosResult[]) => void
+): void {
+  const room = rooms.get(roomId);
+  if (!room) return;
+  if (room.boredomTimer) { clearTimeout(room.boredomTimer); room.boredomTimer = null; }
+  if (room.status !== 'active') return;
+
+  room.boredomTimer = setTimeout(() => {
+    room.boredomTimer = null;
+    if (room.status !== 'active') return;
+    const results = applyBoredomShuffle(roomId, room.engine.turn);
+    if (results.length > 0) onExpire(results);
+    // Restart for the next boredom window (same player still hasn't moved)
+    resetBoredomTimer(roomId, onExpire);
+  }, BOREDOM_MS);
+}
+
+export function clearBoredomTimer(roomId: string): void {
+  const room = rooms.get(roomId);
+  if (!room || !room.boredomTimer) return;
+  clearTimeout(room.boredomTimer);
+  room.boredomTimer = null;
+}
+
+// ── Rematch ──────────────────────────────────────────────────────────────────
+
 export function startRematch(roomId: string, color: Color): boolean {
   const room = rooms.get(roomId);
   if (!room) return false;
@@ -251,6 +283,8 @@ export function startRematch(roomId: string, color: Color): boolean {
   return false;
 }
 
+// ── Disconnect handling ──────────────────────────────────────────────────────
+
 export function markDisconnected(
   socketId: string,
   onExpire: (roomId: string, color: Color) => void
@@ -261,6 +295,8 @@ export function markDisconnected(
       if (p && p.socketId === socketId) {
         p.connected = false;
         const timer = setTimeout(() => {
+          // m-1: don't fire second game-over if game already ended (e.g. via resign)
+          if (room.status === 'finished') return;
           room.status = 'finished';
           onExpire(roomId, color);
         }, RECONNECT_WINDOW_MS);

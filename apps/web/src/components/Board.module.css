@@ -132,6 +132,15 @@
   100% { transform: translate(calc(-50% + var(--dx)), calc(-50% + var(--dy))) scale(0); opacity: 0; }
 }
 
+/* ── Board flip animation (local play auto-rotate) ── */
+@keyframes boardFlip {
+  0%   { opacity: 1; transform: scaleX(1); }
+  40%  { opacity: 0; transform: scaleX(0.05); }
+  60%  { opacity: 0; transform: scaleX(0.05); }
+  100% { opacity: 1; transform: scaleX(1); }
+}
+.flipping { animation: boardFlip 0.32s ease-in-out; }
+
 /* ── Mode badge ── */
 .modeBadge {
   display: inline-block;

@@ -32,12 +32,14 @@ export interface OnlineGameState {
   lobbyStatus: LobbyStatus;
   rematchOffered: boolean;
   opponentDisconnected: boolean;
+  moveError: string | null;
 }
 
 type Action =
   | { type: 'SET_CONNECTION'; status: ConnectionStatus }
   | { type: 'SET_LOBBY'; status: LobbyStatus }
   | { type: 'ROOM_CREATED'; code: string; color: Color }
+  | { type: 'SET_PLAYER_COLOR'; color: Color }
   | { type: 'GAME_START'; fen: string; white: string; black: string; playerColor: Color }
   | { type: 'SELECT'; sq: Square; targets: Square[] }
   | { type: 'DESELECT' }
@@ -49,6 +51,7 @@ type Action =
   | { type: 'TIMER_RESET' }
   | { type: 'ADD_EVENT'; msg: string }
   | { type: 'ADD_CHAT'; msg: ChatMessage }
+  | { type: 'SET_MOVE_ERROR'; msg: string | null }
   | { type: 'GAME_OVER'; winner: Color | null; reason: OnlineGameState['overReason'] }
   | { type: 'REMATCH_OFFERED' }
   | { type: 'REMATCH_ACCEPTED'; fen: string }
@@ -61,11 +64,15 @@ function reducer(state: OnlineGameState, action: Action): OnlineGameState {
     case 'SET_CONNECTION': return { ...state, connectionStatus: action.status };
     case 'SET_LOBBY': return { ...state, lobbyStatus: action.status };
     case 'ROOM_CREATED': return { ...state, roomCode: action.code, playerColor: action.color, lobbyStatus: 'waiting' };
+    // C-2: explicit color update (used by color-assigned event on rematch)
+    case 'SET_PLAYER_COLOR': return { ...state, playerColor: action.color };
     case 'GAME_START': {
-      const playerColor = state.playerColor ?? action.playerColor;
+      // C-3: always use action.playerColor (set from playerColorRef which is always current)
+      const playerColor = action.playerColor;
       const opponentName = playerColor === 'w' ? action.black : action.white;
       return {
         ...state, fen: action.fen,
+        playerColor,
         opponentName,
         lobbyStatus: 'active',
         isOver: false, winner: null, overReason: null,
@@ -75,6 +82,7 @@ function reducer(state: OnlineGameState, action: Action): OnlineGameState {
         events: ['🌐 Game started! May chaos reign...'],
         chatMessages: [], timerSeconds: 15,
         rematchOffered: false, opponentDisconnected: false,
+        moveError: null,
       };
     }
     case 'SELECT': return { ...state, selectedSquare: action.sq, legalTargets: action.targets };
@@ -89,6 +97,7 @@ function reducer(state: OnlineGameState, action: Action): OnlineGameState {
         lastCaptureSq: action.captured ? action.to : null,
         capturedByWhite: capW, capturedByBlack: capB,
         pendingPromotion: null, timerSeconds: 15,
+        moveError: null,
       };
     }
     case 'PHANTOM_APPLIED': {
@@ -107,6 +116,7 @@ function reducer(state: OnlineGameState, action: Action): OnlineGameState {
     case 'TIMER_RESET': return { ...state, timerSeconds: 15 };
     case 'ADD_EVENT': return { ...state, events: [...state.events.slice(-49), action.msg] };
     case 'ADD_CHAT': return { ...state, chatMessages: [...state.chatMessages, action.msg] };
+    case 'SET_MOVE_ERROR': return { ...state, moveError: action.msg };
     case 'GAME_OVER': return { ...state, isOver: true, winner: action.winner, overReason: action.reason };
     case 'REMATCH_OFFERED': return { ...state, rematchOffered: true };
     case 'REMATCH_ACCEPTED': return { ...state, fen: action.fen, isOver: false, winner: null, overReason: null, rematchOffered: false };
@@ -129,6 +139,7 @@ function initialState(playerName = 'Player'): OnlineGameState {
     playerName, opponentName: 'Opponent',
     connectionStatus: 'connecting', lobbyStatus: 'idle',
     rematchOffered: false, opponentDisconnected: false,
+    moveError: null,
   };
 }
 
@@ -139,7 +150,7 @@ export function useOnlineGame(playerName = 'Player') {
   const socketRef = useRef<Socket | null>(null);
   const engineRef = useRef<ChessEngine>(new ChessEngine());
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  // BUG-008: ref to capture playerColor immediately on room-joined, bypassing React batching lag
+  // C-2/C-3: always-current color ref bypasses React batching between room-joined and game-start
   const playerColorRef = useRef<Color | null>(null);
 
   const startTimer = useCallback(() => {
@@ -152,15 +163,21 @@ export function useOnlineGame(playerName = 'Player') {
     if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; }
   }, []);
 
-  // Boredom: signal server when timer hits 0
+  // Display-only boredom countdown: server fires the actual shuffle independently
   useEffect(() => {
     if (state.timerSeconds === 0 && state.lobbyStatus === 'active' && !state.isOver) {
       stopTimer();
-      const roomCode = state.roomCode;
-      if (roomCode) socketRef.current?.emit('chaos-request', { roomId: roomCode });
+      // Brief pause then restart display timer (server handles actual boredom)
       setTimeout(startTimer, 500);
     }
-  }, [state.timerSeconds, state.lobbyStatus, state.isOver, state.roomCode, stopTimer, startTimer]);
+  }, [state.timerSeconds, state.lobbyStatus, state.isOver, stopTimer, startTimer]);
+
+  // Clear move error flash after 2 seconds
+  useEffect(() => {
+    if (!state.moveError) return;
+    const t = setTimeout(() => dispatch({ type: 'SET_MOVE_ERROR', msg: null }), 2000);
+    return () => clearTimeout(t);
+  }, [state.moveError]);
 
   // Connect to Socket.io
   useEffect(() => {
@@ -178,7 +195,6 @@ export function useOnlineGame(playerName = 'Player') {
     });
 
     socket.on('room-joined', ({ color, opponentName }: { color: Color; opponentName: string }) => {
-      // BUG-008: store color in ref immediately so game-start handler sees it even before state commits
       playerColorRef.current = color;
       dispatch({ type: 'GAME_START', fen: engineRef.current.fen, white: opponentName, black: playerName, playerColor: color });
     });
@@ -189,16 +205,21 @@ export function useOnlineGame(playerName = 'Player') {
 
     socket.on('game-start', ({ fen, white, black }: { fen: string; white: string; black: string }) => {
       engineRef.current.load(fen);
-      // BUG-008: use playerColorRef instead of state.playerColor to avoid race condition
+      // C-3: playerColorRef is always up-to-date (set by room-joined or color-assigned)
       dispatch({ type: 'GAME_START', fen, white, black, playerColor: playerColorRef.current ?? 'w' });
       startTimer();
     });
 
-    socket.on('move-made', ({ from, to, promotion, fen, san }: { from: string; to: string; promotion?: string; fen: string; san: string }) => {
+    // C-2: server sends new color after rematch swap
+    socket.on('color-assigned', ({ color }: { color: Color }) => {
+      playerColorRef.current = color;
+      dispatch({ type: 'SET_PLAYER_COLOR', color });
+    });
+
+    socket.on('move-made', ({ from, to, promotion, fen }: { from: string; to: string; promotion?: string; fen: string; san: string }) => {
       const engine = engineRef.current;
       const prevFen = engine.fen;
       engine.load(fen);
-      // Detect capture: compare material
       const prevEngine = new ChessEngine(prevFen);
       const movedPiece = prevEngine.get(from);
       const capturedPiece = prevEngine.get(to);
@@ -209,6 +230,12 @@ export function useOnlineGame(playerName = 'Player') {
       startTimer();
     });
 
+    // M-4: server rejected move — clear selection and show brief error
+    socket.on('move-rejected', ({ message }: { message: string }) => {
+      dispatch({ type: 'DESELECT' });
+      dispatch({ type: 'SET_MOVE_ERROR', msg: message });
+    });
+
     socket.on('chaos-applied', ({ type, from, to, piece, fen, message }: { type: string; from: string; to: string; piece: Piece; fen: string; message: string }) => {
       const prevEngine = new ChessEngine(engineRef.current.fen);
       const capturedPiece = prevEngine.get(to) ?? undefined;
@@ -216,6 +243,8 @@ export function useOnlineGame(playerName = 'Player') {
       playAnimal();
       dispatch({ type: 'PHANTOM_APPLIED', fen, from: from as Square, to: to as Square, captured: capturedPiece });
       dispatch({ type: 'ADD_EVENT', msg: message });
+      // Reset display timer after server-side boredom shuffle
+      if (type === 'boredom') startTimer();
     });
 
     socket.on('chat-received', ({ player, text, timestamp }: ChatMessage) => {
@@ -237,6 +266,7 @@ export function useOnlineGame(playerName = 'Player') {
     socket.on('opponent-reconnected', () => dispatch({ type: 'OPPONENT_RECONNECTED' }));
     socket.on('error', ({ message }: { message: string }) => {
       dispatch({ type: 'ADD_EVENT', msg: `❌ ${message}` });
+      dispatch({ type: 'DESELECT' });
     });
 
     return () => { socket.disconnect(); stopTimer(); };
@@ -244,7 +274,6 @@ export function useOnlineGame(playerName = 'Player') {
   }, []);
 
   // ── Actions ──────────────────────────────────────────────────────────────
-  // BUG-002: accept name param so lobby form can pass the typed name through
   const createRoom = useCallback((name?: string) => {
     const nameToUse = name?.trim() || playerName;
     dispatch({ type: 'SET_LOBBY', status: 'creating' });
@@ -274,6 +303,8 @@ export function useOnlineGame(playerName = 'Player') {
           dispatch({ type: 'SET_PENDING_PROMO', from: selectedSquare, to: sq });
           return;
         }
+        // Optimistically deselect; board won't move until move-made arrives
+        dispatch({ type: 'DESELECT' });
         socketRef.current?.emit('move', { roomId: state.roomCode, from: selectedSquare, to: sq });
         return;
       }
@@ -314,20 +345,21 @@ export function useOnlineGame(playerName = 'Player') {
     socketRef.current?.emit('rematch-accept', { roomId: state.roomCode });
   }, [state.roomCode]);
 
-  // BUG-010: disconnect and reconnect the socket on reset so old room events stop arriving
+  // M-1: emit resign so opponent gets immediate game-over, then reset
   const onReset = useCallback(() => {
     const socket = socketRef.current;
+    if (socket && state.roomCode && state.lobbyStatus === 'active') {
+      socket.emit('resign', { roomId: state.roomCode });
+    }
     if (socket) {
-      if (state.roomCode) socket.emit('leave-room', { roomId: state.roomCode });
       socket.disconnect();
       socket.connect();
     }
     playerColorRef.current = null;
     dispatch({ type: 'RESET' });
     engineRef.current = new ChessEngine();
-  }, [state.roomCode]);
+  }, [state.roomCode, state.lobbyStatus]);
 
-  // BUG-016: memoize derivedEngine so it is not re-instantiated on every render/tick
   const derivedEngine = useMemo(() => new ChessEngine(state.fen), [state.fen]);
 
   return {
@@ -351,8 +383,8 @@ export function useOnlineGame(playerName = 'Player') {
     events: state.events,
     chatMessages: state.chatMessages,
     pendingPromotion: state.pendingPromotion,
+    moveError: state.moveError,
     moveHistory: derivedEngine.getHistory(false) as unknown as string[],
-    // Online-specific
     roomCode: state.roomCode,
     playerColor: state.playerColor,
     opponentName: state.opponentName,
@@ -360,7 +392,6 @@ export function useOnlineGame(playerName = 'Player') {
     lobbyStatus: state.lobbyStatus,
     rematchOffered: state.rematchOffered,
     opponentDisconnected: state.opponentDisconnected,
-    // Actions
     createRoom,
     joinRoom,
     onSquareClick,

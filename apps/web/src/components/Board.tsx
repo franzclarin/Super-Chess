@@ -1,6 +1,6 @@
 'use client';
-import { useRef, useCallback, useEffect } from 'react';
-import type { ChessEngine, Color, Square } from '@super-chess/chess-core';
+import { useRef, useCallback, useEffect, useState } from 'react';
+import type { ChessEngine, Square } from '@super-chess/chess-core';
 import { UNICODE, FILES, RANKS } from '@/lib/constants';
 import s from './Board.module.css';
 
@@ -12,7 +12,8 @@ interface BoardProps {
   lastCaptureSq?: Square | null;
   onSquareClick: (sq: Square) => void;
   mode: 'local' | 'online' | 'bot';
-  humanColor?: Color;
+  flipped?: boolean;
+  animated?: boolean;
   botLabel?: string;
 }
 
@@ -26,10 +27,13 @@ export function Board({
   lastCaptureSq,
   onSquareClick,
   mode,
-  humanColor,
+  flipped,
+  animated,
   botLabel,
 }: BoardProps) {
   const squareRefs = useRef<Map<string, HTMLDivElement>>(new Map());
+  const [isFlipping, setIsFlipping] = useState(false);
+  const prevFlippedRef = useRef<boolean | undefined>(undefined);
 
   const spawnParticles = useCallback((el: HTMLDivElement) => {
     for (let i = 0; i < 12; i++) {
@@ -58,6 +62,20 @@ export function Board({
     if (lastCaptureSq) triggerCapture(lastCaptureSq);
   }, [lastCaptureSq, triggerCapture]);
 
+  // Flip animation: trigger when `flipped` changes (skip initial render)
+  useEffect(() => {
+    if (!animated) return;
+    if (prevFlippedRef.current === undefined) {
+      prevFlippedRef.current = !!flipped;
+      return;
+    }
+    if (prevFlippedRef.current === !!flipped) return;
+    prevFlippedRef.current = !!flipped;
+    setIsFlipping(true);
+    const t = setTimeout(() => setIsFlipping(false), 320);
+    return () => clearTimeout(t);
+  }, [flipped, animated]);
+
   const turn = engine.turn;
   const inCheckSqs = new Set<string>();
   if (engine.inCheck) {
@@ -76,14 +94,13 @@ export function Board({
   const modeLabels = { local: 'LOCAL', online: 'ONLINE', bot: `BOT${botLabel ? ` · ${botLabel}` : ''}` };
   const modeClass = { local: s.badgeLocal, online: s.badgeOnline, bot: s.badgeBot };
 
-  // BUG-003: flip board for black player
-  const displayRanks = humanColor === 'b' ? [...RANKS].reverse() : [...RANKS];
-  const displayFiles = humanColor === 'b' ? [...FILES].reverse() : [...FILES];
+  const displayRanks = flipped ? [...RANKS].reverse() : [...RANKS];
+  const displayFiles = flipped ? [...FILES].reverse() : [...FILES];
 
   return (
     <div className={s.wrap}>
       <span className={`${s.modeBadge} ${modeClass[mode]}`}>{modeLabels[mode]}</span>
-      <div className={s.inner}>
+      <div className={`${s.inner}${isFlipping ? ` ${s.flipping}` : ''}`}>
         <div className={s.rankCol}>
           {displayRanks.map(r => (
             <div key={r} className={s.rankLabel}>{r}</div>

@@ -12,6 +12,7 @@ export default function LocalPage() {
   const game = useLocalGame();
   const router = useRouter();
   const [showConfirm, setShowConfirm] = useState(false);
+  const [autoRotate, setAutoRotate] = useState(false);
 
   return (
     <>
@@ -23,6 +24,8 @@ export default function LocalPage() {
           lastMove={game.lastMove}
           onSquareClick={game.onSquareClick}
           mode="local"
+          flipped={autoRotate && game.turn === 'b'}
+          animated={autoRotate}
           lastCaptureSq={game.lastCaptureSq}
         />
         <Sidebar
@@ -38,6 +41,22 @@ export default function LocalPage() {
           events={game.events}
           chatMessages={game.chatMessages}
           onTrashTalk={game.onTrashTalk}
+          extraPanel={
+            <button
+              onClick={() => setAutoRotate(v => !v)}
+              style={{
+                background: autoRotate ? 'rgba(124,77,255,0.18)' : 'var(--surface2)',
+                border: `1px solid ${autoRotate ? 'var(--accent3)' : 'var(--surface3)'}`,
+                borderRadius: 8, padding: '6px 12px', cursor: 'pointer',
+                color: autoRotate ? 'var(--accent3)' : 'var(--text-dim)',
+                fontSize: '0.78rem', fontWeight: 600,
+                transition: 'background 0.15s, color 0.15s',
+                width: '100%',
+              }}
+            >
+              🔄 Auto-rotate board {autoRotate ? 'ON' : 'OFF'}
+            </button>
+          }
         />
       </div>
 

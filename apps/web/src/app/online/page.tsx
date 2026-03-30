@@ -1,6 +1,7 @@
 'use client';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
+import { useSearchParams } from 'next/navigation';
 import { useOnlineGame } from '@/hooks/useOnlineGame';
 import { Board } from '@/components/Board';
 import { Sidebar } from '@/components/Sidebar';
@@ -32,6 +33,16 @@ function Lobby({ game }: { game: ReturnType<typeof useOnlineGame> }) {
   const [playerName, setName] = useState('');
   const [joinCode, setJoinCode] = useState('');
   const [tab, setTab] = useState<'create' | 'join'>('create');
+  const searchParams = useSearchParams();
+
+  // C-1: auto-populate join code from ?room= URL param
+  useEffect(() => {
+    const roomParam = searchParams.get('room');
+    if (roomParam) {
+      setJoinCode(roomParam.toUpperCase());
+      setTab('join');
+    }
+  }, [searchParams]);
 
   const nameInput = (
     <input
@@ -121,8 +132,22 @@ function Lobby({ game }: { game: ReturnType<typeof useOnlineGame> }) {
                 >
                   {game.roomCode}
                 </div>
+                {/* C-1: invite link with ?room= param */}
+                <div
+                  style={{
+                    marginTop: 8, fontSize: '0.72rem', color: 'var(--accent)',
+                    cursor: 'pointer', textDecoration: 'underline',
+                  }}
+                  onClick={() => {
+                    const url = `${window.location.origin}/online?room=${game.roomCode}`;
+                    navigator.clipboard.writeText(url);
+                  }}
+                  title="Click to copy invite link"
+                >
+                  🔗 Copy invite link
+                </div>
                 <p style={{ color: 'var(--text-dim)', fontSize: '0.72rem', marginTop: 6 }}>
-                  ⏳ Waiting for opponent… (click code to copy)
+                  ⏳ Waiting for opponent…
                 </p>
               </div>
             )}
@@ -190,6 +215,16 @@ export default function OnlinePage() {
   return (
     <>
       <div className="game-layout">
+        {game.moveError && (
+          <div style={{
+            position: 'fixed', top: 16, left: '50%', transform: 'translateX(-50%)',
+            background: 'rgba(233,69,96,0.92)', color: '#fff', borderRadius: 8,
+            padding: '8px 18px', fontSize: '0.85rem', fontWeight: 600,
+            zIndex: 9999, pointerEvents: 'none',
+          }}>
+            ❌ {game.moveError}
+          </div>
+        )}
         <Board
           engine={game.engine}
           selectedSquare={game.selectedSquare}
@@ -197,7 +232,7 @@ export default function OnlinePage() {
           lastMove={game.lastMove}
           onSquareClick={game.onSquareClick}
           mode="online"
-          humanColor={game.playerColor ?? 'w'}
+          flipped={game.playerColor === 'b'}
           lastCaptureSq={game.lastCaptureSq}
         />
         <Sidebar

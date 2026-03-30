@@ -162,7 +162,6 @@ function BotGameView({
           lastMove={game.lastMove}
           onSquareClick={game.onSquareClick}
           mode="bot"
-          humanColor={humanColor}
           botLabel={`${info.icon} ${info.name}`}
           lastCaptureSq={game.lastCaptureSq}
         />
